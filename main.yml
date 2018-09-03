@@ -1,0 +1,85 @@
+---
+  - name: Provision an gcp Instance
+    hosts: local
+    connection: local
+    gather_facts: True
+    vars_files:
+        - vars/creds.yml
+
+    tasks:
+      - name: Creating EIP
+        gce_eip:
+         service_account_email: "{{ service_account_email }}"
+         credentials_file: "{{ credentials_file }}"
+         project_id: "{{ project_id }}"
+         name: "{{hostname}}-ip"
+         region: asia-south1
+         state: present
+
+      - name: Create new DB in existing DB instance
+        local_action: shell sh sql.sh {{ hostname }}-db
+
+      - name: create instances
+        gce:
+          instance_names: "{{ hostname }}"
+          zone: "{{ zone }}"
+          machine_type: "{{ machine_type }}"
+          external_ip: "{{hostname}}-ip"
+          image:  "{{ image }}"
+          state: present
+          service_account_email: "{{ service_account_email }}"
+          credentials_file: "{{ credentials_file }}"
+          project_id: "{{ project_id }}"
+          tags:
+            - http-server 
+            - https-server
+        register: gce
+ 
+      - name: Save host data
+        add_host:
+           hostname: "{{ item.public_ip }}"
+           groupname: gce_instances_ips
+        with_items: "{{ gce.instance_data }}"
+
+      - name: DNS Records
+        gcdns_record:
+           service_account_email: "{{ service_account_email }}"
+           credentials_file: "{{ credentials_file }}"
+           project_id: "{{ project_id }}"
+           record: "{{ hostname }}.{{ dnszone }}"
+           zone_id: "{{ zoneid }}"
+           zone: "{{ dnszone }}"
+           type: A
+           value: "{{ item.public_ip }}"
+        with_items: "{{ gce.instance_data }}"
+   
+      - name: Add host to groupname
+        add_host: hostname={{ item.public_ip }} groupname=new_instances 
+       # ansible_ssh_private_key_file: "{{ansible_env.HOME}}/.ssh/id_rsa"
+        ansible_ssh_private_key_file: "/root/.ssh/id_rsa"
+        ansible_ssh_user: vallabh
+        loop: "{{ gce.instance_data }}"
+
+
+      - name: waits for ssh to be available
+        wait_for:
+          delay: 1
+          host: "{{ item.public_ip }}"
+          port: 22
+          state: started
+          timeout: 30           
+        with_items: "{{ gce.instance_data }}"
+   
+  - name: Manage new instances
+    hosts: new_instances
+    connection: ssh
+    sudo: True
+    vars_files:
+        - vars/creds.yml
+    tasks:
+
+      - name: start nginx
+        service:
+           name: nginx
+           state: started
+           

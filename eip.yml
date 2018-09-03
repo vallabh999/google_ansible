@@ -1,0 +1,34 @@
+---
+  - name: Provision an gcp Instance
+    hosts: local
+    connection: local
+    gather_facts: True
+    vars_files:
+        - vars/creds.yml
+
+    tasks:
+     - name: Creating EIP
+       gce_eip:
+         service_account_email: "{{ service_account_email }}"
+         credentials_file: "{{ credentials_file }}"
+         project_id: "{{ project_id }}"
+         name: "{{hostname}}-ip"
+         region: asia-south1
+         state: present
+
+     - name: create instances
+       gce:
+          instance_names: iptest
+          zone: "{{ zone }}"
+          machine_type: "{{ machine_type }}"
+          external_ip: "{{hostname}}-ip"
+          image:  "{{ image }}"
+          state: present
+          service_account_email: "{{ service_account_email }}"
+          credentials_file: "{{ credentials_file }}"
+          project_id: "{{ project_id }}"
+          tags:
+            - http-server
+            - https-server
+            - tomcat
+       register: gce
